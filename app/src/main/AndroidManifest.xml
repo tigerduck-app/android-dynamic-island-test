@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Runtime (dangerous) permission since API 33. Must ALSO be requested at
+         runtime; declaring it here alone is not enough. Without it granted,
+         the system silently drops every notification we post. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Android 16 / API 36 "Live Updates" (promoted ongoing notifications).
+         A normal permission: granted automatically at install time, so there is
+         no runtime request dialog for it. BUT the user can revoke it in the
+         app's notification settings, which is why the app must still check
+         canPostPromotedNotifications() at runtime rather than assume it. -->
+    <uses-permission android:name="android.permission.POST_PROMOTED_NOTIFICATIONS" />
+
+    <!-- Foreground-service variant. Samsung's Now Bar sources (Voice Recorder,
+         media) are all FGS-backed, so this tests whether an FGS is what Samsung
+         actually requires. specialUse = none of the predefined categories fit a
+         diagnostic harness. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <application
+        android:allowBackup="false"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.IslandCheck">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.IslandCheck">
+
+            <!-- This intent-filter is what makes a launcher icon appear.
+                 MAIN = "this is an entry point", LAUNCHER = "list me in the
+                 app drawer". Remove it and the app installs but is unlaunchable.
+                 android:exported="true" is mandatory since API 31 for any
+                 component with an intent-filter. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".IslandCheckService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Diagnostic harness for Android 16 Live Updates and Samsung Now Bar rendering" />
+        </service>
+    </application>
+</manifest>

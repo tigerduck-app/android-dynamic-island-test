@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Minimal platform theme, no AppCompat dependency. DayNight gives us dark
+         mode for free. The platform has no DayNight.NoActionBar variant, so the
+         action bar is removed explicitly - Compose draws its own chrome. -->
+    <style name="Theme.IslandCheck" parent="android:Theme.DeviceDefault.DayNight">
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>
