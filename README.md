@@ -35,10 +35,14 @@ val builder = NotificationCompat.Builder(context, CHANNEL_ID)
     .setContentTitle("…")
     .setStyle(NotificationCompat.ProgressStyle()…)
 
-// Gate on the API level, not the manufacturer alone: Android 15 fails
-// structurally, and every Android 16+ Samsung tested works.
-if (Build.VERSION.SDK_INT >= 36 &&
-    Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+// Gate on the RUNTIME capability, not on SDK_INT and not on manufacturer.
+// SDK 36 is NOT sufficient: One UI 8.0 is plain Android 16 and reports
+// canPostPromotedNotifications() == false, while One UI 8.5 (Android 16 QPR2)
+// reports true. Only the runtime call distinguishes them.
+val canPromote = Build.VERSION.SDK_INT >= 36 &&
+        NotificationManagerCompat.from(context).canPostPromotedNotifications()
+
+if (canPromote && Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
     builder.addExtras(Bundle().apply {
         putBoolean("android.ongoingActivityNoti.automation", true)
         putString("android.ongoingActivityNoti.automationPackage", context.packageName)
@@ -54,15 +58,26 @@ block is additive, never load-bearing.
 | OS | Android | Device | RON lane (`automation`) | Card lane (`style=1`) |
 | --- | --- | --- | --- | --- |
 | One UI 7.0 | 15 / SDK 35 | Galaxy S25 (SM-S931N) | fails — not in any list | fails — not in any list |
-| One UI 8.5 | 16 / SDK 36 | Galaxy A26 5G (SM-A266B) | **works** — Showing | fails — Hidden, `promoted=false` |
-| One UI 8.5 | 16 / SDK 36 | Galaxy S26 Ultra | **works** | not tested |
+| One UI 8.0 | 16 / SDK 36 | Galaxy Z Flip 6 | **fails — `canPostPromotedNotifications()` = false** | — |
+| One UI 8.5 | 16 QPR2 / SDK 36 | Galaxy A26 5G (SM-A266B) | **works** — Showing | fails — Hidden, `promoted=false` |
+| One UI 8.5 | 16 QPR2 / SDK 36 | Galaxy S26 Ultra | **works** | not tested |
 | One UI 9.0 | 17 / SDK 37 | Galaxy A07 (SM-A075F) | **works** — Showing | **works** — Showing |
 | Stock AOSP | 17 / SDK 37 | emulator | n/a — the AOSP status-bar chip renders unaided | n/a |
 
-Untested: **One UI 8.0**. It matters more than it looks — One UI 8.5 is based on
-Android 16 **QPR2** while 8.0 is plain Android 16, so it is not simply bracketed
-by working versions. Devices that get Android 16 but never One UI 8.5 include the
-Galaxy S22 series, Z Fold 4 and Z Flip 4.
+**The QPR level matters more than the API level.** One UI 8.5 is based on
+Android 16 **QPR2**; One UI 8.0 is plain Android 16. On a Galaxy Z Flip 6 running
+One UI 8.0 the app reports NOT SUPPORTED — `canPostPromotedNotifications()`
+returns `false` despite `SDK_INT == 36`, because the platform gates Live Updates
+behind an internal flag below QPR2. Nothing app-side can change that.
+
+So any Android 16 Galaxy that never receives One UI 8.5 — the Galaxy S22 series,
+Z Fold 4, Z Flip 4, and anything still on 8.0 — will never show a chip. **Always
+branch on `canPostPromotedNotifications()`, never on `SDK_INT` alone.**
+
+Note also that the permission being *granted* is a different signal from the
+capability being *available*: on One UI 8.0 `POST_PROMOTED_NOTIFICATIONS` is
+granted and the capability is still false. The app reports both separately so
+the two are not confused for a revoked permission.
 
 ## Why it works
 

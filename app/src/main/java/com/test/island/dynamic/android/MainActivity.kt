@@ -252,6 +252,13 @@ private fun readNowBarState(context: Context): NowBarState {
 private data class Status(
     val postNotificationsGranted: Boolean,
     val canPostPromoted: Boolean?,
+    /**
+     * The manifest permission's own grant state, which is NOT the same thing as
+     * canPostPromotedNotifications(). Granted + canPost=false means the platform
+     * feature is unavailable on this build (e.g. One UI 8.0, which is plain
+     * Android 16 rather than QPR2) — nothing the user or app can change.
+     */
+    val promotedPermissionGranted: Boolean?,
     val testActive: Boolean,
     /** Did OUR notification satisfy the platform's promotion preconditions? */
     val promotable: Boolean?,
@@ -279,6 +286,17 @@ private fun readStatus(context: Context): Status {
     // separately-revocable permission for promoted notifications.
     val canPost = if (api16) nmc.canPostPromotedNotifications() else null
 
+    // String literal rather than the constant so this still compiles if the
+    // symbol moves; it is a normal permission, granted at install.
+    val promotedPerm = if (api16) {
+        ContextCompat.checkSelfPermission(
+            context,
+            "android.permission.POST_PROMOTED_NOTIFICATIONS",
+        ) == PackageManager.PERMISSION_GRANTED
+    } else {
+        null
+    }
+
     // Read our own notification back out of the shade.
     val sbn = try {
         nmc.activeNotifications.firstOrNull { it.id == NOTIFICATION_ID }
@@ -304,7 +322,7 @@ private fun readStatus(context: Context): Status {
         null
     }
 
-    return Status(granted, canPost, sbn != null, promotable, promotedByOs)
+    return Status(granted, canPost, promotedPerm, sbn != null, promotable, promotedByOs)
 }
 
 /**
@@ -763,10 +781,27 @@ fun IslandCheckScreen(autoMode: String? = null) {
                 )
                 TriStateRow(
                     "POST_PROMOTED_NOTIFICATIONS",
-                    status.canPostPromoted,
-                    "declared + effective",
-                    "declared but not effective (revoked?)",
+                    status.promotedPermissionGranted,
+                    "granted",
+                    "not granted",
                 )
+                // The two signals disagree in exactly one informative way, and
+                // conflating them sends you hunting for a settings toggle that
+                // does not exist. Verified on a Galaxy Z Flip 6 / One UI 8.0.
+                if (status.promotedPermissionGranted == true && status.canPostPromoted != true) {
+                    Text(
+                        "Permission is granted, yet canPostPromotedNotifications() is false. " +
+                                "That means the PLATFORM does not offer the feature on this " +
+                                "build — not that anything was revoked, and not something an " +
+                                "app or a settings toggle can fix.\n\n" +
+                                "Seen on One UI 8.0, which is plain Android 16. One UI 8.5 is " +
+                                "Android 16 QPR2, and the platform gates Live Updates behind an " +
+                                "internal flag below that. Such a device will never show a chip " +
+                                "until it gets a QPR2-based update.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Amber,
+                    )
+                }
                 TriStateRow(
                     "POST_NOTIFICATIONS",
                     status.postNotificationsGranted,
