@@ -71,13 +71,31 @@ returns `false` despite `SDK_INT == 36`, because the platform gates Live Updates
 behind an internal flag below QPR2. Nothing app-side can change that.
 
 So any Android 16 Galaxy that never receives One UI 8.5 — the Galaxy S22 series,
-Z Fold 4, Z Flip 4, and anything still on 8.0 — will never show a chip. **Always
-branch on `canPostPromotedNotifications()`, never on `SDK_INT` alone.**
+Z Fold 4, Z Flip 4, and anything still on 8.0 — will never show a chip. **Never
+branch on `SDK_INT` alone** — but do not gate *posting* on
+`canPostPromotedNotifications()` either (see below).
 
 Note also that the permission being *granted* is a different signal from the
 capability being *available*: on One UI 8.0 `POST_PROMOTED_NOTIFICATIONS` is
 granted and the capability is still false. The app reports both separately so
 the two are not confused for a revoked permission.
+
+## `canPostPromotedNotifications()` fails in both directions
+
+It is a useful diagnostic and a bad gate:
+
+| Device | API says | Actually renders? |
+| --- | --- | --- |
+| OPPO Find X9 / ColorOS 16.0.10 | `false` | **yes** — false negative |
+| Samsung One UI 8.0 / Android 16 | `false` | no — true negative |
+| Samsung One UI 8.5, One UI 9.0 | `true` | yes |
+
+The API cannot tell those two `false` cases apart, so:
+
+**Always post the notification.** If the OEM won't promote it, it degrades to an
+ordinary ongoing notification and costs nothing. Gating on this API instead
+silently removes the feature on devices that would have rendered it — which is
+exactly what happened on the Find X9.
 
 ## Why it works
 

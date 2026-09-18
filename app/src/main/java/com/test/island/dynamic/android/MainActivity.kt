@@ -768,10 +768,15 @@ fun IslandCheckScreen(autoMode: String? = null) {
                     style = MaterialTheme.typography.bodySmall,
                 )
             } else {
+                // Deliberately NOT labelled "NOT SUPPORTED". This API produces
+                // false negatives: on an OPPO Find X9 / ColorOS 16.0.10 it
+                // returns false while the device DOES render AOSP Live Updates
+                // (confirmed with tigerduck-app-android < 2.1.0). So it reports
+                // what the framework claims, not what the OEM will draw.
                 Text(
-                    if (status.canPostPromoted == true) "SUPPORTED" else "NOT SUPPORTED",
+                    if (status.canPostPromoted == true) "SUPPORTED" else "API REPORTS: NO",
                     style = MaterialTheme.typography.headlineMedium,
-                    color = if (status.canPostPromoted == true) Green else Red,
+                    color = if (status.canPostPromoted == true) Green else Amber,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
@@ -779,6 +784,19 @@ fun IslandCheckScreen(autoMode: String? = null) {
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                 )
+                if (status.canPostPromoted != true) {
+                    Text(
+                        "⚠ This is NOT a verdict. Post the test anyway.\n\n" +
+                                "Known false negative: OPPO Find X9 on ColorOS 16.0.10 returns " +
+                                "false here yet renders AOSP Live Updates correctly. A known " +
+                                "true negative: Samsung One UI 8.0 returns false and renders " +
+                                "nothing, because it is plain Android 16 rather than QPR2.\n\n" +
+                                "The API cannot tell those two apart, so never gate posting on " +
+                                "it — run section 3 and look at the screen.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Amber,
+                    )
+                }
                 TriStateRow(
                     "POST_PROMOTED_NOTIFICATIONS",
                     status.promotedPermissionGranted,
