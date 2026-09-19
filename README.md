@@ -55,14 +55,34 @@ block is additive, never load-bearing.
 
 ## Verified device matrix
 
-| OS | Android | Device | RON lane (`automation`) | Card lane (`style=1`) |
-| --- | --- | --- | --- | --- |
-| One UI 7.0 | 15 / SDK 35 | Galaxy S25 (SM-S931N) | fails — not in any list | fails — not in any list |
-| One UI 8.0 | 16 / SDK 36 | Galaxy Z Flip 6 | **fails — `canPostPromotedNotifications()` = false** | — |
-| One UI 8.5 | 16 QPR2 / SDK 36 | Galaxy A26 5G (SM-A266B) | **works** — Showing | fails — Hidden, `promoted=false` |
-| One UI 8.5 | 16 QPR2 / SDK 36 | Galaxy S26 Ultra | **works** | not tested |
-| One UI 9.0 | 17 / SDK 37 | Galaxy A07 (SM-A075F) | **works** — Showing | **works** — Showing |
-| Stock AOSP | 17 / SDK 37 | emulator | n/a — the AOSP status-bar chip renders unaided | n/a |
+| Vendor | OS | Android | Device | Plain AOSP alone | + Samsung `automation` |
+| --- | --- | --- | --- | --- | --- |
+| AOSP | stock | 17 / SDK 37 | emulator | **works** — status-bar chip | n/a |
+| **OPPO** | **ColorOS 16.0.10** | 16 / SDK 36 | **Find X9** | **works — no vendor code needed** | n/a |
+| Samsung | One UI 7.0 | 15 / SDK 35 | Galaxy S25 (SM-S931N) | no chip | fails — not in any list |
+| Samsung | One UI 8.0 | 16 / SDK 36 | Galaxy Z Flip 6 | no chip | fails — capability false |
+| Samsung | One UI 8.5 | 16 QPR2 / SDK 36 | Galaxy A26 5G (SM-A266B) | no chip | **works** — Showing |
+| Samsung | One UI 8.5 | 16 QPR2 / SDK 36 | Galaxy S26 Ultra | no chip | **works** |
+| Samsung | One UI 9.0 | 17 / SDK 37 | Galaxy A07 (SM-A075F) | no chip | **works** — Showing |
+
+(Samsung card lane, `style=1`: fails on 7.0 and 8.5, works on 9.0. It is never
+needed — `automation` alone works everywhere `style=1` does, and more.)
+
+### ColorOS 16 needs nothing
+
+**OPPO Find X9 on ColorOS 16.0.10 renders the island from a plain AOSP promoted
+notification, with zero vendor-specific code** — confirmed in production by
+tigerduck-app-android before 2.1.0. No private extras, no allowlist, no
+reflection.
+
+That is the important result for the whole project: the AOSP path is the
+product, and the Samsung block is a workaround for one vendor that predates the
+standard. If other OEMs behave like ColorOS, the `if (samsung)` block stays the
+only vendor-specific code in the codebase.
+
+Note the Find X9 also returns `false` from `canPostPromotedNotifications()`
+*while rendering correctly* — see the section below. It is the reason that API
+must never gate posting.
 
 **The QPR level matters more than the API level.** One UI 8.5 is based on
 Android 16 **QPR2**; One UI 8.0 is plain Android 16. On a Galaxy Z Flip 6 running
