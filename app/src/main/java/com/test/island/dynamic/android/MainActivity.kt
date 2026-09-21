@@ -491,6 +491,8 @@ private fun buildTestNotification(
         .setContentText("Progress $progress / $PROGRESS_MAX")
         // The chip picks its text in priority order: short critical text, then
         // a metric, then `when`. Setting it makes the pill show the % directly.
+        // HyperOS 3's island differs: short critical text, then title, subtext,
+        // text. It never reads `when`, so without this it would show the title.
         .setShortCriticalText("$progress%")
         .setContentIntent(tapIntent)
         .setOngoing(true)

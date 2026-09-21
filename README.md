@@ -107,6 +107,48 @@ is a Xiaomi-proprietary surface driven by Xiaomi's own Clock app. A third-party
 AOSP promoted notification cannot reach it. Seeing that pill on a HyperOS 2
 device says nothing about whether your app's notification will render.
 
+### What HyperOS 3 puts in the island
+
+HyperOS does not use the AOSP status-bar chip. It draws Live Updates in its own
+island and fills it by its own rules. These rules come from decompiling
+HyperOS's island code on the POCO C85 (HyperOS 3.0.302) while building
+tigerduck-app-android. They have not been re-derived with IslandCheck.
+
+1. It **discards any Xiaomi-specific island parameters** the app sends and
+   builds the layout itself from the standard notification fields.
+2. The right-hand side shows the **first non-empty** of:
+   `shortCriticalText` → `contentTitle` → `subText` → `contentText`.
+3. It **never reads the countdown timer** (`when` + chronometer).
+
+The AOSP chip, as on Pixel and Samsung, tries `shortCriticalText` first and then
+falls back to the timer. The timer is the only thing that ticks without a
+re-post. So the two diverge exactly where a countdown needs them to agree:
+
+| Notification sets | AOSP / Samsung chip | HyperOS island |
+| --- | --- | --- |
+| `shortCriticalText` | that text | that text |
+| no `shortCriticalText`, countdown chronometer | live countdown | **`contentTitle`** — timer ignored |
+
+**The trap:** the usual countdown recipe leaves `shortCriticalText` empty on
+purpose, so the chip falls through to the self-ticking chronometer. On HyperOS
+the island falls through to the title instead. In tigerduck-app-android the
+island showed the notification's title where the countdown should have been.
+
+**The fix, on HyperOS 3+ only:** set `shortCriticalText` to the minutes left,
+rounded up (`"47m"`, `"43 分鐘"`). HyperOS never redraws it by itself, so
+**re-post the notification each time the minute changes**. Leave every other
+OEM on the chronometer, which ticks for free.
+
+IslandCheck always sets `shortCriticalText` (`"42%"`), so it never hits the
+fallback.
+
+**Detecting the version:** read `ro.mi.os.version.code`. It is `3` on HyperOS
+3.0 (`ro.mi.os.version.name` = `OS3.0`). Treat anything below 3 as having no
+island, which matches the HyperOS 2 result above. On HyperOS 3+,
+`canPostPromotedNotifications()` is trustworthy. The decompile shows HyperOS
+uses that same check to decide which notifications reach the island, so on
+HyperOS the API is a real verdict. On ColorOS it is not (see below).
+
 ### Samsung needs One UI 8.5 or later
 
 **The QPR level matters more than the API level.** One UI 8.5 is based on
@@ -134,7 +176,7 @@ It is a useful diagnostic and a bad gate:
 | OPPO Find X9 / ColorOS 16.0.10 | `false` | **yes** — false negative |
 | Samsung One UI 8.0 / Android 16 | `false` | no — true negative |
 | Samsung One UI 8.5, One UI 9.0 | `true` | yes |
-| Xiaomi POCO C85 / HyperOS 3 | `true` | yes |
+| Xiaomi POCO C85 / HyperOS 3 | `true` | yes — the island gates on this same check |
 
 The API cannot tell those two `false` cases apart, so:
 
