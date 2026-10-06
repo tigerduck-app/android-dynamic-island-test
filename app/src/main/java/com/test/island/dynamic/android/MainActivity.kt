@@ -188,8 +188,12 @@ private fun oemVersionProperty(manufacturer: String): Pair<String, String?>? {
                         ?: systemProperty("ro.build.version.oplusrom")
                         ?: systemProperty("ro.build.version.opporom"))
 
+        // ro.vivo.os.version reads 7.0 on a V60 Lite running OriginOS 6, so it
+        // is not the marketed version. `.build.display.id` is ("OriginOS 6").
         m.contains("vivo") || m.contains("iqoo") ->
-            "ro.vivo.os.version" to systemProperty("ro.vivo.os.version")
+            "ro.vivo.os.build.display.id / ro.vivo.os.version" to
+                    (systemProperty("ro.vivo.os.build.display.id")
+                        ?: systemProperty("ro.vivo.os.version"))
 
         // MagicOS_10.0.0 on an X6d 5G. The build number (10.0.0.193) is only
         // in ro.build.display.id, alongside the model code.
