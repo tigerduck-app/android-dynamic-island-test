@@ -2,6 +2,7 @@ package com.test.island.dynamic.android
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.AppOpsManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -15,6 +16,7 @@ import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.Process
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -160,6 +162,7 @@ private fun islandBrand(manufacturer: String): String {
         m.contains("xiaomi") || m.contains("redmi") || m.contains("poco") -> "Hyper Island"
         m.contains("oppo") || m.contains("oneplus") || m.contains("realme") -> "Live Space"
         m.contains("vivo") || m.contains("iqoo") -> "Atomic Island"
+        m.contains("honor") -> "Magic Capsule"
         else -> "Stock Live Updates"
     }
 }
@@ -176,13 +179,22 @@ private fun oemVersionProperty(manufacturer: String): Pair<String, String?>? {
                     (systemProperty("ro.mi.os.version.name")
                         ?: systemProperty("ro.miui.ui.version.name"))
 
+        // `oplusrom` holds only the major version: V16.0.0 on a Reno 11 whose
+        // Settings says ColorOS 16.0.5. `.display` is the string Settings shows.
         m.contains("oppo") || m.contains("oneplus") || m.contains("realme") ->
-            "ro.build.version.oplusrom / ro.build.version.opporom" to
-                    (systemProperty("ro.build.version.oplusrom")
+            "ro.build.version.oplusrom.display / ro.build.version.oplusrom / " +
+                    "ro.build.version.opporom" to
+                    (systemProperty("ro.build.version.oplusrom.display")
+                        ?: systemProperty("ro.build.version.oplusrom")
                         ?: systemProperty("ro.build.version.opporom"))
 
         m.contains("vivo") || m.contains("iqoo") ->
             "ro.vivo.os.version" to systemProperty("ro.vivo.os.version")
+
+        // MagicOS_10.0.0 on an X6d 5G. The build number (10.0.0.193) is only
+        // in ro.build.display.id, alongside the model code.
+        m.contains("honor") ->
+            "ro.build.version.magic" to systemProperty("ro.build.version.magic")
 
         else -> null
     }
@@ -254,11 +266,22 @@ private data class Status(
     val canPostPromoted: Boolean?,
     /**
      * The manifest permission's own grant state, which is NOT the same thing as
-     * canPostPromotedNotifications(). Granted + canPost=false means the platform
-     * feature is unavailable on this build (e.g. One UI 8.0, which is plain
-     * Android 16 rather than QPR2) — nothing the user or app can change.
+     * canPostPromotedNotifications(). Granted + canPost=false + app-op allowed
+     * means the platform feature is unavailable on this build (e.g. One UI 8.0,
+     * which is plain Android 16 rather than QPR2) — nothing the user or app can
+     * change.
      */
     val promotedPermissionGranted: Boolean?,
+    /**
+     * The `android:post_promoted_notifications` app-op. The permission is
+     * `normal|appop`, so its grant never changes; this op is what the per-app
+     * settings switch flips. VERIFIED 2026-10-07 on an OPPO Reno 11 / ColorOS
+     * 16.0.5: the op defaults to `ignore` for third-party apps, and the switch
+     * ("Show Live Updates on Live Alerts") sets it to `allow`. MagicOS 10
+     * leaves it at MODE_DEFAULT, which defers to the permission grant. Null
+     * when the build has no such op.
+     */
+    val promotedAppOpAllowed: Boolean?,
     val testActive: Boolean,
     /** Did OUR notification satisfy the platform's promotion preconditions? */
     val promotable: Boolean?,
@@ -297,6 +320,31 @@ private fun readStatus(context: Context): Status {
         null
     }
 
+    // There is no public OPSTR constant for this op, so it is named directly.
+    // unsafeCheckOpNoThrow throws IllegalArgumentException on a build that
+    // does not know the op, which reads as null. MODE_DEFAULT hands the
+    // decision back to the permission grant, as on MagicOS 10.
+    val promotedAppOp = if (api16) {
+        try {
+            when (
+                context.getSystemService(AppOpsManager::class.java).unsafeCheckOpNoThrow(
+                    "android:post_promoted_notifications",
+                    Process.myUid(),
+                    context.packageName,
+                )
+            ) {
+                AppOpsManager.MODE_ALLOWED, AppOpsManager.MODE_FOREGROUND -> true
+                AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED -> false
+                AppOpsManager.MODE_DEFAULT -> promotedPerm
+                else -> null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    } else {
+        null
+    }
+
     // Read our own notification back out of the shade.
     val sbn = try {
         nmc.activeNotifications.firstOrNull { it.id == NOTIFICATION_ID }
@@ -322,7 +370,9 @@ private fun readStatus(context: Context): Status {
         null
     }
 
-    return Status(granted, canPost, promotedPerm, sbn != null, promotable, promotedByOs)
+    return Status(
+        granted, canPost, promotedPerm, promotedAppOp, sbn != null, promotable, promotedByOs,
+    )
 }
 
 /**
@@ -519,10 +569,12 @@ private fun cancelTest(context: Context) {
 }
 
 /**
- * POST_PROMOTED_NOTIFICATIONS is a NORMAL permission — granted at install and
- * not requestable via ActivityResultContracts. The user can still revoke it,
- * and the only way to restore it is the system settings screen, so deep-link
- * there. Not every build ships that screen, hence the fallback.
+ * POST_PROMOTED_NOTIFICATIONS is a `normal|appop` permission — granted at
+ * install and not requestable via ActivityResultContracts. The per-app switch
+ * on this screen sets the `android:post_promoted_notifications` app-op, and
+ * the only way to turn it on is the system settings screen, so deep-link
+ * there. ColorOS 16.0.5 ships it off for every third-party app. Not every
+ * build ships that screen, hence the fallback.
  */
 private fun openPromotionSettings(context: Context) {
     val candidates = buildList {
@@ -774,7 +826,9 @@ fun IslandCheckScreen(autoMode: String? = null) {
                 // false negatives: on an OPPO Find X9 / ColorOS 16.0.10 it
                 // returns false while the device DOES render AOSP Live Updates
                 // (confirmed with tigerduck-app-android < 2.1.0). So it reports
-                // what the framework claims, not what the OEM will draw.
+                // what the framework claims, not what the OEM will draw. Its
+                // false can also be a per-app switch the user can flip: on an
+                // OPPO Reno 11 / ColorOS 16.0.5 the switch defaults to off.
                 Text(
                     if (status.canPostPromoted == true) "SUPPORTED" else "API REPORTS: NO",
                     style = MaterialTheme.typography.headlineMedium,
@@ -792,8 +846,11 @@ fun IslandCheckScreen(autoMode: String? = null) {
                                 "Known false negative: OPPO Find X9 on ColorOS 16.0.10 returns " +
                                 "false here yet renders AOSP Live Updates correctly. A known " +
                                 "true negative: Samsung One UI 8.0 returns false and renders " +
-                                "nothing, because it is plain Android 16 rather than QPR2.\n\n" +
-                                "The API cannot tell those two apart, so never gate posting on " +
+                                "nothing, because it is plain Android 16 rather than QPR2. A " +
+                                "fixable one: OPPO Reno 11 on ColorOS 16.0.5 returns false, and " +
+                                "renders nothing, until the user turns on \"Show Live Updates " +
+                                "on Live Alerts\" for this app. That switch is off by default.\n\n" +
+                                "The API cannot tell those cases apart, so never gate posting on " +
                                 "it — run section 3 and look at the screen.",
                         style = MaterialTheme.typography.bodySmall,
                         color = Amber,
@@ -805,10 +862,35 @@ fun IslandCheckScreen(autoMode: String? = null) {
                     "granted",
                     "not granted",
                 )
-                // The two signals disagree in exactly one informative way, and
-                // conflating them sends you hunting for a settings toggle that
-                // does not exist. Verified on a Galaxy Z Flip 6 / One UI 8.0.
-                if (status.promotedPermissionGranted == true && status.canPostPromoted != true) {
+                TriStateRow(
+                    "Promotion app-op",
+                    status.promotedAppOpAllowed,
+                    "allowed",
+                    "NOT allowed — per-app switch is off",
+                )
+                // The permission stays granted when the user turns the per-app
+                // switch off; only the app-op moves. Verified on an OPPO Reno 11 /
+                // ColorOS 16.0.5, which ships the switch off.
+                if (status.promotedAppOpAllowed == false && status.canPostPromoted != true) {
+                    Text(
+                        "The per-app Live Updates switch is off. The permission still " +
+                                "reads as granted because the switch does not touch it; it " +
+                                "sets the app-op above.\n\n" +
+                                "ColorOS 16.0.5 ships this switch OFF for every third-party " +
+                                "app and calls it \"Show Live Updates on Live Alerts\". Tap " +
+                                "\"Open promotion settings\" in section 3 and turn it on.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Amber,
+                    )
+                }
+                // Granted permission and allowed app-op, yet still false: the
+                // platform itself is not offering the feature. Conflating this
+                // with the case above sends you hunting for a settings toggle
+                // that does not exist. Verified on a Galaxy Z Flip 6 / One UI 8.0.
+                if (status.promotedPermissionGranted == true &&
+                    status.promotedAppOpAllowed != false &&
+                    status.canPostPromoted != true
+                ) {
                     Text(
                         "Permission is granted, yet canPostPromotedNotifications() is false. " +
                                 "That means the PLATFORM does not offer the feature on this " +
@@ -868,10 +950,11 @@ fun IslandCheckScreen(autoMode: String? = null) {
                         Text("Open promotion settings")
                     }
                     Text(
-                        "POST_PROMOTED_NOTIFICATIONS is a normal manifest permission — it is " +
+                        "POST_PROMOTED_NOTIFICATIONS is a normal|appop permission — it is " +
                                 "granted at install and cannot be requested through a runtime " +
-                                "dialog. If it reads as not effective, the user has turned it off, " +
-                                "and only the system settings screen can restore it.",
+                                "dialog. Its per-app switch sets the app-op, and only the " +
+                                "system settings screen can change it. Some builds ship the " +
+                                "switch off (ColorOS 16.0.5).",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -1055,6 +1138,9 @@ private fun verdict(s: Status): String = when {
     s.promotable == false ->
         "→ The notification did NOT meet the promotion preconditions, so the OS declined " +
                 "to promote it. Check: ongoing, non-empty title, promotable style, not colorized."
+    s.promotedAppOpAllowed == false ->
+        "→ The per-app Live Updates switch is off, so the post stays an ordinary " +
+                "ongoing notification. Open promotion settings and turn it on."
     s.canPostPromoted != true ->
         "→ Promotion is not permitted for this app right now, so the post stays an " +
                 "ordinary ongoing notification."
