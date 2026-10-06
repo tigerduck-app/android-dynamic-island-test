@@ -59,6 +59,8 @@ block is additive, never load-bearing.
 | --- | --- | --- | --- | --- | --- |
 | AOSP | stock | 17 / SDK 37 | emulator | **works** — status-bar chip | n/a |
 | **OPPO** | **ColorOS 16.0.10** | 16 / SDK 36 | **Find X9** | **works — no vendor code needed** | n/a |
+| **OPPO** | **ColorOS 16.0.5** | 16 / SDK 36 | **Reno 11 (CPH2599)** | **works once the user turns on a per-app switch** — ships off | n/a |
+| **Honor** | **MagicOS 10.0.0.193** | 16 / SDK 36 | **X6d 5G (NLA-NX1)** | **works — no vendor code, no switch** | n/a |
 | Xiaomi | HyperOS 2 | 15 / SDK 35 | POCO C85 (25078PC3EG) | no island — app reports "requires Android 16+" | n/a |
 | **Xiaomi** | **HyperOS 3.0 (OS3.0.302.0)** | 16 / SDK 36 | **POCO C85 (25078PC3EG)** | **works — no vendor code needed** | n/a |
 | Samsung | One UI 7.0 | 15 / SDK 35 | Galaxy S25 (SM-S931N) | no chip | fails — not in any list |
@@ -70,7 +72,7 @@ block is additive, never load-bearing.
 (Samsung card lane, `style=1`: fails on 7.0 and 8.5, works on 9.0. It is never
 needed — `automation` alone works everywhere `style=1` does, and more.)
 
-### ColorOS 16 and HyperOS 3 need nothing
+### ColorOS 16 and HyperOS 3 need no vendor code
 
 **OPPO Find X9 on ColorOS 16.0.10 renders the island from a plain AOSP promoted
 notification, with zero vendor-specific code** — confirmed in production by
@@ -89,6 +91,94 @@ standard. ColorOS and HyperOS both render the standard as-is, so the
 Note the Find X9 also returns `false` from `canPostPromotedNotifications()`
 *while rendering correctly* — see the section below. It is the reason that API
 must never gate posting.
+
+"No vendor code" is not "no setup", though. ColorOS 16.0.5 renders the same
+notification only after the user turns on a per-app switch, and that switch
+ships off. See the next section.
+
+### ColorOS 16.0.5 ships the per-app switch off
+
+On an OPPO Reno 11 (CPH2599) running ColorOS 16.0.5, a fresh install shows **no
+island**. `canPostPromotedNotifications()` returns `false`, the OS does not set
+`FLAG_PROMOTED_ONGOING`, and the post appears as an ordinary status-bar icon.
+
+The cause is a per-app switch that is **off by default**: the app's notification
+settings → **Show Live Updates on Live Alerts**. The AOSP intent
+`Settings.ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS` opens that screen
+directly. Turn the switch on and the same unchanged notification renders as the
+island (`ⓘ 25%`). There is still no vendor code involved.
+
+What the switch changes, read over adb with the switch off and then on:
+
+| Signal | Off (default) | On |
+| --- | --- | --- |
+| `POST_PROMOTED_NOTIFICATIONS` permission | granted | granted |
+| `android:post_promoted_notifications` app-op | `ignore` | `allow` |
+| `promoted=` in `dumpsys notification` AppSettings | `true` | `true` |
+| `canPostPromotedNotifications()` | `false` | `true` |
+| `FLAG_PROMOTED_ONGOING` on the posted notification | absent | set |
+| Island | none | renders |
+
+The permission is `normal|appop`. It is granted at install and never changes;
+the switch changes the app-op. On this build the op's default mode is `ignore`,
+so every app starts with the switch off unless ColorOS pre-allows it. Google
+Maps and ColorOS Clock were already `allow`. ChatGPT, Gemini and Facebook were
+at the default `ignore`.
+
+On this build, then, the API is an accurate verdict: `false` really does mean
+nothing will render. What it cannot tell you is that the user can fix it. An app
+should:
+
+1. **Still always post.** With the switch off, the notification is an ordinary
+   ongoing notification and costs nothing.
+2. **When the API returns `false`, offer a button** that fires
+   `ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS` with `EXTRA_APP_PACKAGE`. That is
+   an AOSP intent, so it is not vendor code.
+3. **To tell "switch off" from "platform can't"**, read the app-op. There is no
+   public constant, so name the op directly:
+
+   ```kotlin
+   val mode = context.getSystemService(AppOpsManager::class.java)
+       .unsafeCheckOpNoThrow("android:post_promoted_notifications",
+                             Process.myUid(), context.packageName)
+   // MODE_IGNORED → the user can fix it in settings.
+   // Throws IllegalArgumentException on a build without the op.
+   ```
+
+IslandCheck shows this as the **Promotion app-op** row in section 2.
+
+Two further observations:
+
+- **This is base Android 16, not QPR2.** `ro.build.id` is `BP2A.250605.015`,
+  the June 2025 release, and it still promotes. So base Android 16 *can* do Live
+  Updates. Whether One UI 8.0's `false` comes from a platform flag (see the
+  Samsung section) or from this same app-op has not been re-checked. The new
+  app-op row will show which.
+- **The version property.** `ro.build.version.oplusrom` holds only the major
+  version (`V16.0.0`). The `16.0.5` that Settings shows is in
+  `ro.build.version.oplusrom.display`, which IslandCheck now reads first.
+
+**Open question:** the Find X9 returned `false` *and* rendered, while the
+Reno 11 renders nothing until the API returns `true`. The Find X9 result came
+from tigerduck-app-android, and nobody recorded its app-op state, so it is not
+yet clear whether the two builds really behave differently.
+
+### MagicOS 10 needs nothing
+
+**Honor X6d 5G (NLA-NX1) on MagicOS 10.0.0.193 renders the plain AOSP
+notification in its island (`ⓘ 25%`) out of the box.**
+`canPostPromotedNotifications()` returns `true` and the OS sets
+`FLAG_PROMOTED_ONGOING`.
+
+There is no island switch. MagicOS leaves the
+`android:post_promoted_notifications` app-op at `default`, which defers to the
+permission, and the permission is granted at install. No activity handles
+`ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS`, so IslandCheck's settings button
+falls back to the app's ordinary notification settings. Turning the app's
+notifications off turns the island off with them, as you would expect.
+
+The version is in `ro.build.version.magic` (`MagicOS_10.0.0`). The build number
+appears only in `ro.build.display.id` (`NLA-N31 10.0.0.193(C363E8R202P1)`).
 
 ### HyperOS 2 has no island to reach
 
@@ -165,7 +255,10 @@ branch on `SDK_INT` alone** — but do not gate *posting* on
 Note also that the permission being *granted* is a different signal from the
 capability being *available*: on One UI 8.0 `POST_PROMOTED_NOTIFICATIONS` is
 granted and the capability is still false. The app reports both separately so
-the two are not confused for a revoked permission.
+the two are not confused for a revoked permission. It also reports the
+`android:post_promoted_notifications` app-op, which is what a settings switch
+actually changes. On ColorOS 16.0.5 that op is `ignore` while the permission
+still reads granted.
 
 ## `canPostPromotedNotifications()` fails in both directions
 
@@ -174,11 +267,14 @@ It is a useful diagnostic and a bad gate:
 | Device | API says | Actually renders? |
 | --- | --- | --- |
 | OPPO Find X9 / ColorOS 16.0.10 | `false` | **yes** — false negative |
+| OPPO Reno 11 / ColorOS 16.0.5, switch off (default) | `false` | no — true negative, but the user can fix it |
+| OPPO Reno 11 / ColorOS 16.0.5, switch on | `true` | yes |
 | Samsung One UI 8.0 / Android 16 | `false` | no — true negative |
 | Samsung One UI 8.5, One UI 9.0 | `true` | yes |
 | Xiaomi POCO C85 / HyperOS 3 | `true` | yes — the island gates on this same check |
+| Honor X6d 5G / MagicOS 10 | `true` | yes |
 
-The API cannot tell those two `false` cases apart, so:
+The API cannot tell those `false` cases apart, so:
 
 **Always post the notification.** If the OEM won't promote it, it degrades to an
 ordinary ongoing notification and costs nothing. Gating on this API instead
