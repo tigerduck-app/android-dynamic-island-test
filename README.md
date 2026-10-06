@@ -61,6 +61,7 @@ block is additive, never load-bearing.
 | **OPPO** | **ColorOS 16.0.10** | 16 / SDK 36 | **Find X9** | **works — no vendor code needed** | n/a |
 | **OPPO** | **ColorOS 16.0.5** | 16 / SDK 36 | **Reno 11 (CPH2599)** | **works once the user turns on a per-app switch** — ships off | n/a |
 | **Honor** | **MagicOS 10.0.0.193** | 16 / SDK 36 | **X6d 5G (NLA-NX1)** | **works — no vendor code, no switch** | n/a |
+| **vivo** | **OriginOS 6 (16.1.13.4)** | 16 / SDK 36 | **V60 Lite (V2529)** | **works — no vendor code, no switch** | n/a |
 | Xiaomi | HyperOS 2 | 15 / SDK 35 | POCO C85 (25078PC3EG) | no island — app reports "requires Android 16+" | n/a |
 | **Xiaomi** | **HyperOS 3.0 (OS3.0.302.0)** | 16 / SDK 36 | **POCO C85 (25078PC3EG)** | **works — no vendor code needed** | n/a |
 | Samsung | One UI 7.0 | 15 / SDK 35 | Galaxy S25 (SM-S931N) | no chip | fails — not in any list |
@@ -180,6 +181,26 @@ notifications off turns the island off with them, as you would expect.
 The version is in `ro.build.version.magic` (`MagicOS_10.0.0`). The build number
 appears only in `ro.build.display.id` (`NLA-N31 10.0.0.193(C363E8R202P1)`).
 
+### OriginOS 6 needs nothing
+
+**vivo V60 Lite (V2529) on OriginOS 6 (`PD2512F_EX_A_16.1.13.4.W20`) behaves
+the same way.** The plain AOSP notification renders in the island (`ⓘ 85%`),
+`canPostPromotedNotifications()` returns `true`, and the OS sets
+`FLAG_PROMOTED_ONGOING`.
+
+The app-op is at `default`, as on MagicOS. Unlike MagicOS, OriginOS does handle
+`ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS`, but the intent opens the
+ordinary per-app notification page (allow, silent, lock screen, pop-up,
+badges). That page has no Live Updates or island switch.
+
+**The version property:** `ro.vivo.os.version` reads `7.0`, which is not the
+marketed version. `ro.vivo.os.build.display.id` holds `OriginOS 6`, and
+IslandCheck now reads it first.
+
+**Screenshots over adb:** `adb exec-out screencap -p` returns an all-black
+image on this phone, even unlocked. Write the capture on the device
+(`adb shell screencap -p /sdcard/x.png`), then `adb pull` it.
+
 ### HyperOS 2 has no island to reach
 
 The same POCO C85 was tested on HyperOS 2 (Android 15) before its upgrade.
@@ -273,6 +294,7 @@ It is a useful diagnostic and a bad gate:
 | Samsung One UI 8.5, One UI 9.0 | `true` | yes |
 | Xiaomi POCO C85 / HyperOS 3 | `true` | yes — the island gates on this same check |
 | Honor X6d 5G / MagicOS 10 | `true` | yes |
+| vivo V60 Lite / OriginOS 6 | `true` | yes |
 
 The API cannot tell those `false` cases apart, so:
 
