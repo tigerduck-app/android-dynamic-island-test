@@ -87,7 +87,10 @@ render as Xiaomi's island. Again, no vendor code.
 That is the important result for the whole project: the AOSP path is the
 product, and the Samsung block is a workaround for one vendor that predates the
 standard. ColorOS and HyperOS both render the standard as-is, so the
-`if (samsung)` block stays the only vendor-specific code in the codebase.
+`if (samsung)` block stays the only vendor-specific code needed to make the
+island appear. What the island then shows for a countdown is a separate
+question, and there ColorOS and HyperOS do need help — see
+[ColorOS and OriginOS ignore the timer too](#coloros-and-originos-ignore-the-timer-too-magicos-runs-it).
 
 Note the Find X9 also returns `false` from `canPostPromotedNotifications()`
 *while rendering correctly* — see the section below. It is the reason that API
@@ -162,14 +165,19 @@ Two further observations:
 **Open question:** the Find X9 returned `false` *and* rendered, while the
 Reno 11 renders nothing until the API returns `true`. The Find X9 result came
 from tigerduck-app-android, and nobody recorded its app-op state, so it is not
-yet clear whether the two builds really behave differently.
+yet clear whether the two builds really behave differently. Until someone
+measures it, tigerduck-app-android treats the Find X9 like the Reno 11: it
+believes the API, and when the API says `false` it points the user at the
+switch.
 
 ### MagicOS 10 needs nothing
 
 **Honor X6d 5G (NLA-NX1) on MagicOS 10.0.0.193 renders the plain AOSP
 notification in its island (`ⓘ 25%`) out of the box.**
 `canPostPromotedNotifications()` returns `true` and the OS sets
-`FLAG_PROMOTED_ONGOING`.
+`FLAG_PROMOTED_ONGOING`. Left without `shortCriticalText`, the island runs a
+countdown chronometer the way the AOSP chip does — see
+[below](#coloros-and-originos-ignore-the-timer-too-magicos-runs-it).
 
 There is no island switch. MagicOS leaves the
 `android:post_promoted_notifications` app-op at `default`, which defers to the
@@ -186,7 +194,9 @@ appears only in `ro.build.display.id` (`NLA-N31 10.0.0.193(C363E8R202P1)`).
 **vivo V60 Lite (V2529) on OriginOS 6 (`PD2512F_EX_A_16.1.13.4.W20`) behaves
 the same way.** The plain AOSP notification renders in the island (`ⓘ 85%`),
 `canPostPromotedNotifications()` returns `true`, and the OS sets
-`FLAG_PROMOTED_ONGOING`.
+`FLAG_PROMOTED_ONGOING`. One difference from MagicOS: the island ignores a
+countdown chronometer and shows the app name instead — see
+[below](#coloros-and-originos-ignore-the-timer-too-magicos-runs-it).
 
 The app-op is at `default`, as on MagicOS. Unlike MagicOS, OriginOS does handle
 `ACTION_APP_NOTIFICATION_PROMOTION_SETTINGS`, but the intent opens the
@@ -245,10 +255,11 @@ purpose, so the chip falls through to the self-ticking chronometer. On HyperOS
 the island falls through to the title instead. In tigerduck-app-android the
 island showed the notification's title where the countdown should have been.
 
-**The fix, on HyperOS 3+ only:** set `shortCriticalText` to the minutes left,
-rounded up (`"47m"`, `"43 分鐘"`). HyperOS never redraws it by itself, so
-**re-post the notification each time the minute changes**. Leave every other
-OEM on the chronometer, which ticks for free.
+**The fix, on HyperOS 3+ (and on ColorOS and OriginOS, see the next
+section):** set `shortCriticalText` to the minutes left, rounded up (`"47m"`,
+`"43 分鐘"`). HyperOS never redraws it by itself, so **re-post the notification
+each time the minute changes**. Leave the AOSP chip, Samsung and MagicOS on the
+chronometer, which ticks for free.
 
 IslandCheck always sets `shortCriticalText` (`"42%"`), so it never hits the
 fallback.
@@ -259,6 +270,34 @@ island, which matches the HyperOS 2 result above. On HyperOS 3+,
 `canPostPromotedNotifications()` is trustworthy. The decompile shows HyperOS
 uses that same check to decide which notifications reach the island, so on
 HyperOS the API is a real verdict. On ColorOS it is not (see below).
+
+### ColorOS and OriginOS ignore the timer too; MagicOS runs it
+
+Measured on 2026-10-07 with tigerduck-app-android's in-class Live Update
+preview, posted on Android 16 and then backgrounded: a countdown chronometer
+(`when` in the future, `showChronometer`, `chronometerCountDown`), the title
+`Preview Course`, and no `shortCriticalText`. Every phone set
+`FLAG_PROMOTED_ONGOING`. What the island drew differed:
+
+| Device | Chronometer, no `shortCriticalText` | `shortCriticalText` set |
+| --- | --- | --- |
+| OPPO Reno 11 / ColorOS 16.0.5, switch on | **`contentTitle`** (`Preview Course`) | that text (`34m`) |
+| vivo V60 Lite / OriginOS 6 | **the app name** (`TigerDuck`) | that text (`34m`) |
+| Honor X6d 5G / MagicOS 10 | live countdown (`32:26`) | that text (IslandCheck's `ⓘ 25%`) |
+
+So the HyperOS fix applies to ColorOS and OriginOS as well: set
+`shortCriticalText` to the minutes left and re-post on each minute change.
+MagicOS behaves like the AOSP chip and keeps the chronometer.
+
+OriginOS does not fall back the way HyperOS does. It showed the app name, not
+the title, so it does not seem to walk `contentTitle` → `subText` →
+`contentText`. Only the two cases in the table were tried. IslandCheck's own
+runs on these phones never showed the gap, because it always sets
+`shortCriticalText`.
+
+The Find X9 (ColorOS 16.0.10) was not re-tested. tigerduck-app-android applies
+the static text to every ColorOS phone, and to OnePlus and realme, which ship
+the same ROM.
 
 ### Samsung needs One UI 8.5 or later
 
